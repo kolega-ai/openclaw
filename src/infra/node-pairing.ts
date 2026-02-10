@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveStateDir } from "../config/paths.js";
@@ -143,8 +143,13 @@ function normalizeNodeId(nodeId: string) {
   return nodeId.trim();
 }
 
-function newToken() {
-  return randomUUID().replaceAll("-", "");
+/**
+ * Generates a cryptographically secure token for node authentication.
+ * Uses 32 bytes (256 bits) of entropy from crypto.randomBytes(),
+ * encoded as base64url (URL-safe, no padding).
+ */
+function newToken(): string {
+  return randomBytes(32).toString("base64url");
 }
 
 export async function listNodePairing(baseDir?: string): Promise<NodePairingList> {

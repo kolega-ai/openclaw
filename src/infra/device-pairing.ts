@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveStateDir } from "../config/paths.js";
@@ -231,8 +231,13 @@ function scopesAllow(requested: string[], allowed: string[]): boolean {
   return requested.every((scope) => allowedSet.has(scope));
 }
 
-function newToken() {
-  return randomUUID().replaceAll("-", "");
+/**
+ * Generates a cryptographically secure token for device authentication.
+ * Uses 32 bytes (256 bits) of entropy from crypto.randomBytes(),
+ * encoded as base64url (URL-safe, no padding).
+ */
+function newToken(): string {
+  return randomBytes(32).toString("base64url");
 }
 
 export async function listDevicePairing(baseDir?: string): Promise<DevicePairingList> {
