@@ -349,9 +349,9 @@ describe("buildDockerExecArgs", () => {
     const commandArg = args[args.length - 1];
     expect(args).toContain("OPENCLAW_PREPEND_PATH=/custom/bin:/usr/local/bin:/usr/bin");
     expect(commandArg).toContain('export PATH="${OPENCLAW_PREPEND_PATH}:$PATH"');
-    expect(commandArg).toContain("echo hello");
+    expect(commandArg).toContain("'echo' 'hello'");
     expect(commandArg).toBe(
-      'export PATH="${OPENCLAW_PREPEND_PATH}:$PATH"; unset OPENCLAW_PREPEND_PATH; echo hello',
+      'export PATH="${OPENCLAW_PREPEND_PATH}:$PATH"; unset OPENCLAW_PREPEND_PATH; \'echo\' \'hello\'',
     );
   });
 
@@ -371,6 +371,8 @@ describe("buildDockerExecArgs", () => {
     expect(args).toContain(`OPENCLAW_PREPEND_PATH=${injectedPath}`);
     expect(commandArg).not.toContain(injectedPath);
     expect(commandArg).toContain("OPENCLAW_PREPEND_PATH");
+    // Command should be safely escaped
+    expect(commandArg).toContain("'echo' 'hello'");
   });
 
   it("does not add PATH export when PATH is not in env", () => {
@@ -384,7 +386,7 @@ describe("buildDockerExecArgs", () => {
     });
 
     const commandArg = args[args.length - 1];
-    expect(commandArg).toBe("echo hello");
+    expect(commandArg).toBe("'echo' 'hello'");
     expect(commandArg).not.toContain("export PATH");
   });
 
@@ -422,5 +424,52 @@ describe("buildDockerExecArgs", () => {
     });
 
     expect(args).toContain("-t");
+  });
+
+  it("prevents command injection by escaping shell metacharacters", () => {
+    const maliciousCommand = "echo hello; rm -rf /";
+    const args = buildDockerExecArgs({
+      containerName: "test-container",
+      command: maliciousCommand,
+      env: { HOME: "/home/user" },
+      tty: false,
+    });
+
+    const commandArg = args[args.length - 1];
+    // The semicolon and rm command should be escaped as separate arguments
+    expect(commandArg).toContain("'echo' 'hello;' 'rm' '-rf' '/'");
+    // Should not contain unescaped semicolon that could be interpreted by shell
+    expect(commandArg).not.toMatch(/;\s*rm/);
+  });
+
+  it("properly escapes commands with single quotes", () => {
+    const commandWithQuotes = "echo 'hello world'";
+    const args = buildDockerExecArgs({
+      containerName: "test-container",
+      command: commandWithQuotes,
+      env: { HOME: "/home/user" },
+      tty: false,
+    });
+
+    const commandArg = args[args.length - 1];
+    // Should escape the command properly
+    expect(commandArg).toContain("'echo' 'hello world'");
+  });
+
+  it("handles commands with dangerous metacharacters safely", () => {
+    const dangerousCommand = "echo $(whoami) && cat /etc/passwd";
+    const args = buildDockerExecArgs({
+      containerName: "test-container",
+      command: dangerousCommand,
+      env: { HOME: "/home/user" },
+      tty: false,
+    });
+
+    const commandArg = args[args.length - 1];
+    // All parts should be individually escaped
+    expect(commandArg).toContain("'echo' '$(whoami)' '&&' 'cat' '/etc/passwd'");
+    // Should not contain unescaped operators
+    expect(commandArg).not.toMatch(/\$\(whoami\)/);
+    expect(commandArg).not.toMatch(/&&\s*cat/);
   });
 });

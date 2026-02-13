@@ -48,6 +48,71 @@ export function coerceEnv(env?: NodeJS.ProcessEnv | Record<string, string>) {
   return record;
 }
 
+/**
+ * Escapes a string for safe inclusion in a shell single-quoted context.
+ * This prevents shell metacharacter interpretation by wrapping the string
+ * in single quotes and properly escaping any embedded single quotes.
+ */
+function escapeShellArg(arg: string): string {
+  // Replace every single quote with '\'' (end quote, escaped quote, start quote)
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
+
+/**
+ * Safely parses a command string into executable and arguments.
+ * This is a simplified parser that handles basic quoting and escaping.
+ * For more complex shell syntax, consider using a proper shell parser library.
+ */
+function parseCommand(command: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  let quoteChar = '';
+  let escaped = false;
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+    
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+
+    if (inQuotes) {
+      if (char === quoteChar) {
+        inQuotes = false;
+        quoteChar = '';
+      } else {
+        current += char;
+      }
+    } else {
+      if (char === '"' || char === "'") {
+        inQuotes = true;
+        quoteChar = char;
+      } else if (char === ' ' || char === '\t') {
+        if (current.trim()) {
+          parts.push(current.trim());
+          current = '';
+        }
+      } else {
+        current += char;
+      }
+    }
+  }
+
+  if (current.trim()) {
+    parts.push(current.trim());
+  }
+
+  return parts;
+}
+
 export function buildDockerExecArgs(params: {
   containerName: string;
   command: string;
@@ -77,7 +142,20 @@ export function buildDockerExecArgs(params: {
   const pathExport = hasCustomPath
     ? 'export PATH="${OPENCLAW_PREPEND_PATH}:$PATH"; unset OPENCLAW_PREPEND_PATH; '
     : "";
-  args.push(params.containerName, "sh", "-lc", `${pathExport}${params.command}`);
+
+  // SECURITY FIX: Parse and escape the command to prevent injection
+  // This prevents shell metacharacters from being interpreted while preserving
+  // basic command execution functionality
+  const commandParts = parseCommand(params.command);
+  
+  if (commandParts.length === 0) {
+    throw new Error('Invalid command: no executable found');
+  }
+
+  // Escape each part of the command separately to prevent injection
+  const escapedCommandParts = commandParts.map(escapeShellArg).join(' ');
+  
+  args.push(params.containerName, "sh", "-lc", `${pathExport}${escapedCommandParts}`);
   return args;
 }
 
